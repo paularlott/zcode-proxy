@@ -1,0 +1,117 @@
+version: "3"
+
+vars:
+  PROJECT_NAME: zcode-proxy
+  PLATFORMS:
+    - linux/amd64
+    - linux/arm64
+    - darwin/amd64
+    - darwin/arm64
+    - windows/amd64
+    - windows/arm64
+  BUILT_AT:
+    sh: date +%Y%m%d.%H%M%S%z
+  BUILD_FLAGS: '-ldflags="-s -w -X github.com/paularlott/zcode-proxy/build.Date={{.BUILT_AT}}" -trimpath'
+  OUTPUT_DIR: dist
+  VERSION:
+    sh: go run ./scripts/getversion
+
+tasks:
+  default:
+    desc: Build the binary for the current platform
+    deps: [build]
+
+  build:
+    desc: Build the binary for the current platform
+    cmds:
+      - mkdir -p {{.OUTPUT_DIR}}
+      - go build {{.BUILD_FLAGS}} -o {{.OUTPUT_DIR}}/{{.PROJECT_NAME}} .
+    sources:
+      - ./**/*.go
+      - go.mod
+      - go.sum
+    generates:
+      - "{{.OUTPUT_DIR}}/{{.PROJECT_NAME}}"
+
+  all:
+    desc: Build the binary for all platforms
+    cmds:
+      - task: build-platform
+        vars: { PLATFORM: "{{.ITEM}}" }
+        for:
+          var: "PLATFORMS"
+    sources:
+      - ./**/*.go
+      - go.mod
+      - go.sum
+
+  build-platform:
+    internal: true
+    label: "Building for {{.PLATFORM}}"
+    vars:
+      GOOS: '{{splitList "/" .PLATFORM | first}}'
+      GOARCH: '{{splitList "/" .PLATFORM | last}}'
+      EXT: '{{if eq .GOOS "windows"}}.exe{{end}}'
+      OUTPUT_FILE: "{{.OUTPUT_DIR}}/{{$.PROJECT_NAME}}_{{.GOOS}}_{{.GOARCH}}{{.EXT}}"
+      ZIP_FILE: "{{$.PROJECT_NAME}}_{{.GOOS}}_{{.GOARCH}}.zip"
+      FINAL_NAME: "{{$.PROJECT_NAME}}{{.EXT}}"
+    env:
+      GOOS: "{{.GOOS}}"
+      GOARCH: "{{.GOARCH}}"
+    cmds:
+      - mkdir -p {{$.OUTPUT_DIR}}
+      - go build {{$.BUILD_FLAGS}} -o {{$.OUTPUT_FILE}} .
+      - |
+        cd {{$.OUTPUT_DIR}} && \
+        mv {{$.PROJECT_NAME}}_{{.GOOS}}_{{.GOARCH}}{{.EXT}} {{.FINAL_NAME}} && \
+        zip {{.ZIP_FILE}} {{.FINAL_NAME}}
+    sources:
+      - ./**/*.go
+      - go.mod
+      - go.sum
+    generates:
+      - "{{.OUTPUT_DIR}}/{{.ZIP_FILE}}"
+
+  checksums:
+    desc: Show the ZIP file checksums
+    cmds:
+      - shasum -a 256 {{.OUTPUT_DIR}}/*.zip
+
+  homebrew-formula:
+    desc: Generate the Homebrew formula
+    method: none
+    cmds:
+      - go run ./scripts/homebrew-formula/ > ../homebrew-tap/Formula/zcode-proxy.rb
+
+  release:
+    desc: Tag, build, create GitHub release, and update Homebrew
+    cmds:
+      - |
+        if git tag -l v{{.VERSION}} | grep -q v{{.VERSION}}; then
+          echo "Tag v{{.VERSION}} already exists, skipping tag creation"
+        else
+          echo "Creating tag v{{.VERSION}}"
+          git tag -a v{{.VERSION}} -m "Release {{.VERSION}}"
+          git push origin v{{.VERSION}}
+        fi
+      - task: all
+      - task: create-release
+      - task: checksums
+      - task: homebrew-formula
+
+  create-release:
+    desc: Create a GitHub release with the built artifacts
+    internal: true
+    cmds:
+      - gh release create v{{.VERSION}} {{.OUTPUT_DIR}}/*.zip -t "Release {{.VERSION}}" -n "zcode-proxy {{.VERSION}}"
+    deps: [all]
+
+  test:
+    desc: Run all Go tests
+    cmds:
+      - go test ./...
+
+  clean:
+    desc: Remove previous build artifacts
+    cmds:
+      - rm -rf {{.OUTPUT_DIR}}
