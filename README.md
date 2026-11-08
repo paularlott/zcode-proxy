@@ -68,6 +68,10 @@ zcode-proxy --listen 127.0.0.1:9443
 Run `zcode-proxy --help` for all flags — backend health check intervals,
 dial timeouts, failover thresholds, log level and format.
 
+## Contributing
+
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for how to contribute and how to sign the Contributor License Agreement.
+
 ## License
 
 MIT License — Copyright (c) 2026 Paul Arlott. See [LICENSE.txt](LICENSE.txt).
